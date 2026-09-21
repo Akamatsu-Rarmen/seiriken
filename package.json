@@ -8,6 +8,5 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "@replit/database": "^3.0.1"
   }
 }
