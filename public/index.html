@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>入場整理券</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#e8e1d0; --paper-2:#ded5bf; --ink:#22201b; --ink-soft:#5b5646;
+    --stamp:#a63a2c; --stamp-soft:#c9877c; --line:#b9ad8e;
+    --ok:#2f5d55; --ok-bg:#dde6df; --warn:#a9781f; --warn-bg:#efe3c9;
+    --full:#7d7767; --full-bg:#dcd6c4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#1d1b16; --paper-2:#2a271f; --ink:#efe9d8; --ink-soft:#a89f88;
+      --stamp:#e08670; --stamp-soft:#8a4a3c; --line:#4a4536;
+      --ok:#7fb3a4; --ok-bg:#22322c; --warn:#d9b15a; --warn-bg:#3a3221;
+      --full:#8f8a78; --full-bg:#302c22;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:'Zen Kaku Gothic New', 'Hiragino Kaku Gothic ProN', sans-serif;
+    min-height:100%;
+    padding:calc(28px + env(safe-area-inset-top,0px)) 16px calc(60px + env(safe-area-inset-bottom,0px));
+  }
+  .wrap{max-width:520px;margin:0 auto;}
+  header{margin-bottom:20px;text-align:center;}
+  .kicker{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:0.08em;color:var(--ink-soft);margin:0 0 4px;}
+  h1{font-size:28px;font-weight:900;margin:0;line-height:1.3;}
+  h1 span{color:var(--stamp);}
+  .date-line{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--ink-soft);margin-top:8px;}
+  .sync-note{font-size:11px;color:var(--ink-soft);margin-top:6px;}
+
+  .perforation{border:none;border-top:2px dashed var(--line);margin:22px 0;}
+
+  .slot{position:relative;padding:14px;margin-bottom:10px;background:var(--paper-2);border:1px solid var(--line);cursor:pointer;}
+  .slot.disabled{cursor:not-allowed;opacity:0.65;}
+  .slot.selected{border-color:var(--ink);box-shadow:2px 2px 0 var(--ink);}
+  .slot-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+  .slot-time{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:16px;}
+  .slot-status{font-size:12px;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap;}
+  .status-ok{background:var(--ok-bg);color:var(--ok);}
+  .status-warn{background:var(--warn-bg);color:var(--warn);}
+  .status-full{background:var(--full-bg);color:var(--full);}
+  .bar-track{margin-top:9px;height:8px;background:var(--paper);position:relative;overflow:hidden;}
+  .bar-fill{height:100%;transition:width .25s ease;}
+  .fill-ok{background:var(--ok);} .fill-warn{background:var(--warn);} .fill-full{background:var(--full);}
+  .slot-count{margin-top:6px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-soft);}
+
+  .form-card{margin-top:14px;padding:18px;background:var(--paper-2);border:1px solid var(--ink);position:relative;}
+  .form-card::before, .form-card::after{content:"";position:absolute;width:18px;height:18px;background:var(--paper);border-radius:50%;top:50%;transform:translateY(-50%);}
+  .form-card::before{left:-10px;} .form-card::after{right:-10px;}
+  .form-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+  .form-row .field{flex:1;min-width:120px;}
+  .field label{font-size:11px;color:var(--ink-soft);display:block;margin-bottom:3px;}
+  input[type="text"], input[type="number"]{
+    width:100%;font-family:'IBM Plex Mono',monospace;background:var(--paper);border:1px solid var(--line);
+    border-radius:2px;padding:9px;font-size:14px;color:var(--ink);
+  }
+  input:focus{outline:2px solid var(--stamp-soft);outline-offset:1px;}
+  .primary-btn{
+    width:100%;background:var(--stamp);color:var(--paper);border:none;font-family:'Zen Kaku Gothic New',sans-serif;
+    font-weight:700;font-size:16px;padding:14px 20px;cursor:pointer;letter-spacing:0.02em;
+  }
+  .primary-btn:disabled{background:var(--full);cursor:not-allowed;}
+  .ghost-btn{
+    background:transparent;border:1px solid var(--line);color:var(--ink-soft);
+    font-family:'Zen Kaku Gothic New',sans-serif;font-size:13px;padding:8px 12px;
+    border-radius:2px;cursor:pointer;
+  }
+  .ghost-btn:hover{border-color:var(--ink-soft);color:var(--ink);}
+  .hint{font-size:12px;color:var(--ink-soft);margin-top:8px;text-align:center;}
+
+  .my-ticket{margin-top:10px;padding:26px 20px;background:var(--paper-2);border:1px solid var(--ink);position:relative;text-align:center;}
+  .my-ticket::before, .my-ticket::after{content:"";position:absolute;width:22px;height:22px;background:var(--paper);border-radius:50%;top:50%;transform:translateY(-50%);}
+  .my-ticket::before{left:-12px;} .my-ticket::after{right:-12px;}
+  .my-ticket .label{font-size:13px;color:var(--ink-soft);}
+  .my-ticket .num{font-family:'IBM Plex Mono',monospace;font-size:56px;font-weight:700;color:var(--stamp);letter-spacing:0.02em;margin:8px 0;}
+  .my-ticket .time-range{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;}
+  .my-ticket .meta{margin-top:10px;font-size:13px;color:var(--ink-soft);}
+  .my-ticket .cancel-row{margin-top:18px;padding-top:14px;border-top:1px dashed var(--line);}
+
+  .banner{font-size:13px;padding:10px 12px;border:1px solid var(--line);background:var(--warn-bg);color:var(--ink);margin-bottom:16px;}
+  .loading{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--ink-soft);padding:30px 0;text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="kicker">EVENT ENTRY TICKET</p>
+    <h1>入場<span>整理券</span></h1>
+    <p class="date-line" id="date-line"></p>
+    <p class="sync-note">当日のみ受付可能です（日本時間の午前0時で自動的に切り替わります）。ログイン・会員登録は不要です。</p>
+  </header>
+  <hr class="perforation">
+  <div id="app"><div class="loading">読み込み中…</div></div>
+</div>
+
+<script>
+(function(){
+  const HOURS_START = 9, HOURS_END = 16; // フロント側の初期表示用（サーバー応答で上書きされる）
+  const CAPACITY_FALLBACK = 25;
+  const STORAGE_KEY = 'seiriken_my_ticket_v1';
+  const POLL_MS = 5000;
+
+  let hoursStart = HOURS_START, hoursEnd = HOURS_END, capacity = CAPACITY_FALLBACK;
+  let currentDate = todayStr();
+  let ticketsByHour = {};
+  let myTicket = null; // { date, id, hour, num, name, size, time }
+  let selectedHour = null;
+  let ready = false;
+  let issuing = false;
+  let pollTimer = null;
+
+  const app = document.getElementById('app');
+  const dateLine = document.getElementById('date-line');
+
+  // ---- JST-based clock, regardless of the viewer's own timezone ----
+  function jstNow(){
+    const now = new Date();
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+    return new Date(utcMs + 9 * 60 * 60000);
+  }
+  function todayStr(){
+    const d = jstNow();
+    return d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
+  }
+  function todayLabel(){
+    const d = jstNow();
+    const w = ['日','月','火','水','木','金','土'][d.getUTCDay()];
+    return `${d.getUTCFullYear()}年${d.getUTCMonth()+1}月${d.getUTCDate()}日（${w}）`;
+  }
+  function padNum(n){ return String(n).padStart(3,'0'); }
+
+  function showBanner(msg){
+    const b = document.createElement('div');
+    b.className = 'banner';
+    b.textContent = msg;
+    app.prepend(b);
+    setTimeout(()=>b.remove(), 5000);
+  }
+
+  function loadMyTicketFromStorage(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return null;
+      const t = JSON.parse(raw);
+      if(t && t.date === currentDate) return t;
+      return null;
+    }catch(e){ return null; }
+  }
+  function saveMyTicketToStorage(t){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(t)); }catch(e){}
+  }
+  function clearMyTicketStorage(){
+    try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+  }
+
+  async function fetchTickets(){
+    try{
+      const res = await fetch('/api/tickets?date=' + encodeURIComponent(currentDate));
+      const data = await res.json();
+      if(!data.ok) throw new Error(data.error || 'unknown');
+      ticketsByHour = data.ticketsByHour || {};
+      hoursStart = data.hoursStart; hoursEnd = data.hoursEnd; capacity = data.capacity;
+
+      // 自分の整理券がまだ有効か（他で取り消されていないか）を確認
+      const stored = loadMyTicketFromStorage();
+      if(stored){
+        const list = ticketsByHour[String(stored.hour)] || [];
+        const stillThere = list.some(t => t.id === stored.id);
+        myTicket = stillThere ? stored : null;
+        if(!stillThere) clearMyTicketStorage();
+      }else{
+        myTicket = null;
+      }
+      ready = true;
+      render();
+    }catch(e){
+      showBanner('状況の取得に失敗しました。通信環境をご確認ください。');
+    }
+  }
+
+  function render(){
+    dateLine.textContent = todayLabel() + '受付分（日本時間）';
+    if(!ready){ app.innerHTML = '<div class="loading">読み込み中…</div>'; return; }
+
+    if(myTicket){
+      const h = myTicket.hour;
+      app.innerHTML = `
+        <div class="my-ticket">
+          <div class="label">あなたの整理券</div>
+          <div class="num">No. ${padNum(myTicket.num)}</div>
+          <div class="time-range">${String(h).padStart(2,'0')}:00〜${String(h+1).padStart(2,'0')}:00 入場</div>
+          <div class="meta">${myTicket.name ? myTicket.name + '・' : ''}${myTicket.size ? myTicket.size + '名・' : ''}${myTicket.time} 受付</div>
+          <div class="cancel-row">
+            <button class="ghost-btn" id="cancel-mine">取消して選びなおす</button>
+          </div>
+        </div>
+        <p class="hint">この時間帯にこの番号でご案内します。画面を再度開いても同じ整理券が表示されます。</p>
+      `;
+      return;
+    }
+
+    let html = '';
+    for(let h = hoursStart; h < hoursEnd; h++){
+      const list = ticketsByHour[String(h)] || [];
+      const count = list.length;
+      const pct = Math.min(100, Math.round((count/capacity)*100));
+      let statusClass='status-ok', fillClass='fill-ok', statusLabel='受付中';
+      const full = count >= capacity;
+      if(full){ statusClass='status-full'; fillClass='fill-full'; statusLabel='満'; }
+      else if(pct >= 80){ statusClass='status-warn'; fillClass='fill-warn'; statusLabel='まもなく満'; }
+      const isSelected = selectedHour === h;
+
+      html += `
+        <div class="slot ${isSelected?'selected':''} ${full?'disabled':''}" data-hour="${h}">
+          <div class="slot-top">
+            <span class="slot-time">${String(h).padStart(2,'0')}:00–${String(h+1).padStart(2,'0')}:00</span>
+            <span class="slot-status ${statusClass}">${statusLabel}</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${pct}%"></div></div>
+          <div class="slot-count">${count} / ${capacity} 組</div>
+        </div>
+      `;
+    }
+
+    if(selectedHour !== null){
+      html += `
+        <div class="form-card">
+          <div class="form-row">
+            <div class="field"><label for="grp-name">お名前・グループ名（任意）</label><input type="text" id="grp-name" placeholder="例）田中様"></div>
+            <div class="field"><label for="grp-size">人数（任意）</label><input type="number" id="grp-size" min="1" placeholder="例）2"></div>
+          </div>
+          <button class="primary-btn" id="register-btn" ${issuing?'disabled':''}>${issuing?'受付中…':'この時間で整理券を受け取る'}</button>
+        </div>
+      `;
+    }else{
+      html += '<p class="hint">受け取りたい入場時間帯をタップしてください。</p>';
+    }
+
+    app.innerHTML = html;
+  }
+
+  async function register(hour){
+    if(issuing) return;
+    issuing = true; render();
+    const nameEl = document.getElementById('grp-name');
+    const sizeEl = document.getElementById('grp-size');
+    const name = nameEl ? nameEl.value.trim() : '';
+    const size = sizeEl && sizeEl.value ? Number(sizeEl.value) : null;
+    try{
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: currentDate, hour, name, size })
+      });
+      const data = await res.json();
+      if(!data.ok){
+        if(data.error === 'full') showBanner('この時間帯は満枠になりました。別の時間帯をお選びください。');
+        else showBanner('受付に失敗しました。もう一度お試しください。');
+        await fetchTickets();
+      }else{
+        const t = { date: currentDate, ...data.ticket };
+        saveMyTicketToStorage(t);
+        myTicket = t;
+        selectedHour = null;
+      }
+    }catch(e){
+      showBanner('通信に失敗しました。もう一度お試しください。');
+    }
+    issuing = false;
+    render();
+  }
+
+  async function cancelMine(){
+    if(!myTicket) return;
+    if(!confirm('整理券を取り消しますか？')) return;
+    try{
+      await fetch('/api/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: currentDate, id: myTicket.id })
+      });
+    }catch(e){
+      showBanner('取消に失敗しました。もう一度お試しください。');
+    }
+    clearMyTicketStorage();
+    myTicket = null;
+    await fetchTickets();
+  }
+
+  app.addEventListener('click', async (e) => {
+    const slotEl = e.target.closest('.slot');
+    const registerBtn = e.target.closest('#register-btn');
+    const cancelMineBtn = e.target.closest('#cancel-mine');
+
+    if(cancelMineBtn){ await cancelMine(); return; }
+    if(registerBtn){ if(selectedHour !== null) await register(selectedHour); return; }
+    if(slotEl && !slotEl.classList.contains('disabled')){
+      const hour = Number(slotEl.dataset.hour);
+      selectedHour = (selectedHour === hour) ? null : hour;
+      render();
+    }
+  });
+
+  // 日本時間の日付をまたいだら自動的に切り替える
+  setInterval(() => {
+    const t = todayStr();
+    if(t !== currentDate){
+      currentDate = t;
+      selectedHour = null;
+      myTicket = null;
+      clearMyTicketStorage();
+      fetchTickets();
+    }
+  }, 30000);
+
+  // 他の来場者の受付状況を反映するため定期的に再取得
+  pollTimer = setInterval(fetchTickets, POLL_MS);
+
+  fetchTickets();
+})();
+</script>
+</body>
+</html>
