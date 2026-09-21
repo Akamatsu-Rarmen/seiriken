@@ -1,0 +1,13 @@
+{
+  "name": "seiriken-event-ticket",
+  "version": "1.0.0",
+  "description": "Self-service event entry ticket system (25 groups / hour, JST, no login required)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "@replit/database": "^3.0.1"
+  }
+}
