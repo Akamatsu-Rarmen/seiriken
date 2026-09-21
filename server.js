@@ -1,166 +1,150 @@
-const express = require("express");
-const sqlite3 = require("sqlite3").verbose();
+
+// server.js
+// 入場整理券システム: サーバーのメモリ上でデータを保持するバックエンド。
+// 25組/時間、9:00-16:00固定、日本時間(JST)基準で日付を扱う。
+// 外部データベースへの依存がないため、Render / Railway / Fly.io など
+// どの環境でも追加設定なしでそのまま動きます。
+//
+// 注意: メモリ上に保持しているだけなので、サーバーを再起動（再デプロイ・
+// 無料プランのスリープからの復帰など）すると、その時点のデータは消えます。
+// 再起動をまたいでデータを残したい場合は、Renderの無料PostgreSQLなど
+// 外部データベースへの保存に変更してください（対応も可能です）。
+ 
+const express = require('express');
+const path = require('path');
+const crypto = require('node:crypto');
+ 
+// date -> array of tickets, "date_hour" -> next ticket number
+const store = { tickets: {}, counters: {} };
+ 
 const app = express();
-
-const db = new sqlite3.Database("tickets.db");
-
-// テーブル作成
-db.run(`
-CREATE TABLE IF NOT EXISTS tickets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-`);
-
-// 時間帯
-function getSlot() {
-  const hour = new Date().getHours() + 9;
-
-  if (hour === 10) return "1部（9:00〜10:00）";
-  if (hour === 11) return "2部（10:00〜11:00）";
-  if (hour === 12) return "3部（11:00〜12:00）";
-  if (hour === 13) return "4部 (12:00〜13:00) ";
-  if (hour === 14) return "5部 (13:00〜14:00) ";
-  if (hour === 15) return "6部 (14:00〜15:00) ";
-  
-  return "時間外";
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+ 
+const HOURS_START = 9;
+const HOURS_END = 16; // 9:00-16:00 (exclusive end)
+const CAPACITY = 25;
+ 
+// ---- simple in-process mutex so concurrent requests for the same
+//      date+hour never hand out the same ticket number ----
+const locks = new Map();
+function withLock(key, fn) {
+  const prev = locks.get(key) || Promise.resolve();
+  const run = () => Promise.resolve().then(fn);
+  const next = prev.then(run, run);
+  locks.set(key, next.catch(() => {}));
+  return next;
 }
-
-// API
-app.get("/get-ticket", (req, res) => {
+ 
+function isValidDate(d) {
+  return typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d);
+}
+function counterKey(date, hour) { return `${date}_${hour}`; }
+ 
+function getTickets(date) {
+  if (!store.tickets[date]) store.tickets[date] = [];
+  return store.tickets[date];
+}
+function setTickets(date, list) {
+  store.tickets[date] = list;
+}
+function getCounter(date, hour) {
+  return store.counters[counterKey(date, hour)] || 1;
+}
+function setCounter(date, hour, value) {
+  store.counters[counterKey(date, hour)] = value;
+}
+ 
+function groupByHour(tickets) {
+  const byHour = {};
+  for (const t of tickets) {
+    const h = String(t.hour);
+    if (!byHour[h]) byHour[h] = [];
+    byHour[h].push(t);
+  }
+  for (const h in byHour) byHour[h].sort((a, b) => a.num - b.num);
+  return byHour;
+}
+ 
+// GET /api/tickets?date=YYYY-MM-DD  -> { ticketsByHour, capacity, hoursStart, hoursEnd }
+app.get('/api/tickets', async (req, res) => {
+  const date = req.query.date;
+  if (!isValidDate(date)) return res.status(400).json({ ok: false, error: 'invalid_date' });
+  try {
+    const tickets = getTickets(date);
+    res.json({
+      ok: true,
+      ticketsByHour: groupByHour(tickets),
+      capacity: CAPACITY,
+      hoursStart: HOURS_START,
+      hoursEnd: HOURS_END
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+ 
+// POST /api/register { date, hour, name, size } -> { ok, ticket } | { ok:false, error }
+app.post('/api/register', async (req, res) => {
+  const { date, hour, name, size } = req.body || {};
+  const h = Number(hour);
+  if (!isValidDate(date) || !Number.isInteger(h) || h < HOURS_START || h >= HOURS_END) {
+    return res.status(400).json({ ok: false, error: 'invalid_request' });
+  }
+  try {
+    const result = await withLock(`${date}:${h}`, () => {
+      const tickets = getTickets(date);
+      const countForHour = tickets.filter(t => t.hour === h).length;
+      if (countForHour >= CAPACITY) return { ok: false, error: 'full' };
+ 
+      const nextNum = getCounter(date, h);
+      const ticket = {
+        id: crypto.randomUUID(),
+        hour: h,
+        num: nextNum,
+        name: typeof name === 'string' ? name.trim().slice(0, 80) : '',
+        size: Number.isFinite(Number(size)) && Number(size) > 0 ? Math.floor(Number(size)) : null,
+        time: nowTimeStrJST()
+      };
+      tickets.push(ticket);
+      setTickets(date, tickets);
+      setCounter(date, h, nextNum + 1);
+      return { ok: true, ticket };
+    });
+    if (!result.ok) return res.status(409).json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+ 
+// POST /api/cancel { date, id } -> { ok:true } | { ok:false, error }
+app.post('/api/cancel', async (req, res) => {
+  const { date, id } = req.body || {};
+  if (!isValidDate(date) || typeof id !== 'string') {
+    return res.status(400).json({ ok: false, error: 'invalid_request' });
+  }
+  try {
+    await withLock(`${date}:cancel`, () => {
+      const tickets = getTickets(date);
+      const filtered = tickets.filter(t => t.id !== id);
+      setTickets(date, filtered);
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+ 
+function nowTimeStrJST() {
   const now = new Date();
-  const hour = now.getHours();
-
-  db.get(
-    `SELECT COUNT(*) as count FROM tickets 
-     WHERE strftime('%H', created_at) = '${hour.toString().padStart(2, '0')}'`,
-    (err, row) => {
-
-      // 15人制限
-      if (row.count >= 15) {
-        return res.json({
-          success: false,
-          message: "この部は満員です"
-        });
-      }
-
-      db.run("INSERT INTO tickets DEFAULT VALUES", function(err) {
-        res.json({
-          success: true,
-          number: row.count + 1, // ←ここがポイント
-          slot: getSlot()
-        });
-      });
-    }
-  );
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const jst = new Date(utcMs + 9 * 60 * 60000);
+  return String(jst.getUTCHours()).padStart(2, '0') + ':' + String(jst.getUTCMinutes()).padStart(2, '0');
+}
+ 
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`整理券サーバー起動: http://localhost:${PORT}`);
 });
-
-// 画面
-app.get("/", (req, res) => {
-  res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body {
-  margin:0;
-  overflow:hidden;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  height:100vh;
-  background: radial-gradient(circle at bottom, #0d1b2a, #000);
-  font-family:sans-serif;
-  color:white;
-}
-
-/* 流れ星用 */
-.shooting-star {
-  position:absolute;
-  top:0;
-  left:50%;
-  width:2px;
-  height:80px;
-  background: linear-gradient(white, transparent);
-  opacity:0;
-  transform: rotate(45deg);
-  animation: shoot 2s linear infinite;
-}
-
-@keyframes shoot {
-  0% {
-    transform: translate(0,0) rotate(45deg);
-    opacity:1;
-  }
-  100% {
-    transform: translate(-600px,600px) rotate(45deg);
-    opacity:0;
-  }
-}
-
-/* カード */
-.ticket {
-  position:relative;
-  z-index:10;
-  background: rgba(255,255,255,0.95);
-  color:#222;
-  padding:40px;
-  border-radius:25px;
-  text-align:center;
-  box-shadow:0 20px 60px rgba(0,0,0,0.5);
-  width:300px;
-}
-
-.slot {
-  font-size:18px;
-  margin-bottom:10px;
-  color:#666;
-}
-
-.number {
-  font-size:100px;
-  font-weight:bold;
-}
-
-.label {
-  font-size:14px;
-  color:#888;
-}
-</style>
-</head>
-
-<body>
-<div class="shooting-star" style="left:20%; animation-delay:0s;"></div>
-<div class="shooting-star" style="left:50%; animation-delay:1s;"></div>
-<div class="shooting-star" style="left:80%; animation-delay:2s;"></div>
-<div class="ticket">
-  <div id="slot"></div>
-  <div id="number">...</div>
-  <div>整理券番号</div>
-</div>
-
-<script>
-async function getTicket() {
-  const res = await fetch('/get-ticket');
-  const data = await res.json();
-
-  if (!data.success) {
-    document.getElementById("number").innerText = "×";
-    document.getElementById("slot").innerText = data.message;
-  } else {
-    document.getElementById("number").innerText = data.number;
-    document.getElementById("slot").innerText = data.slot;
-  }
-}
-
-// 開いた瞬間に発行
-getTicket();
-</script>
-
-</body>
-</html>
-`);
-});
-
-app.listen(3000, () => console.log("started"));
+ 
